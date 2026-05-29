@@ -46,18 +46,18 @@ claude-usage dashboard
 
 After install, the `claude-usage` command is on your `PATH` and accepts the same subcommands as `python cli.py` (`scan`, `today`, `stats`, `dashboard`).
 
-### Windows
-```
-git clone https://github.com/phuryn/claude-usage
-cd claude-usage
-python cli.py dashboard
-```
-
 ### macOS / Linux (clone)
 ```
 git clone https://github.com/phuryn/claude-usage
 cd claude-usage
 python3 cli.py dashboard
+```
+
+### Windows
+```
+git clone https://github.com/phuryn/claude-usage
+cd claude-usage
+python cli.py dashboard
 ```
 
 ---
