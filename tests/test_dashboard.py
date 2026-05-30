@@ -30,24 +30,27 @@ class TestGetDashboardData(unittest.TestCase):
             "session_id": "sess-abc123", "project_name": "user/myproject",
             "first_timestamp": "2026-04-08T09:00:00Z",
             "last_timestamp": "2026-04-08T10:00:00Z",
-            "git_branch": "main", "model": "claude-sonnet-4-6",
+            "git_branch": "", "model": "codex/custom",
             "total_input_tokens": 5000, "total_output_tokens": 2000,
             "total_cache_read": 500, "total_cache_creation": 200,
+            "total_reasoning_tokens": 300,
             "turn_count": 10,
         }]
         upsert_sessions(conn, sessions)
         turns = [
             {
                 "session_id": "sess-abc123", "timestamp": "2026-04-08T09:30:00Z",
-                "model": "claude-sonnet-4-6", "input_tokens": 500,
+                "model": "codex/custom", "input_tokens": 500,
                 "output_tokens": 200, "cache_read_tokens": 50,
-                "cache_creation_tokens": 20, "tool_name": None, "cwd": "/tmp",
+                "cache_creation_tokens": 20, "reasoning_tokens": 30,
+                "tool_name": None, "cwd": "/tmp",
             },
             {
                 "session_id": "sess-abc123", "timestamp": "2026-04-08T14:15:00Z",
-                "model": "claude-sonnet-4-6", "input_tokens": 300,
+                "model": "codex/custom", "input_tokens": 300,
                 "output_tokens": 150, "cache_read_tokens": 0,
-                "cache_creation_tokens": 0, "tool_name": None, "cwd": "/tmp",
+                "cache_creation_tokens": 0, "reasoning_tokens": 20,
+                "tool_name": None, "cwd": "/tmp",
             },
         ]
         insert_turns(conn, turns)
@@ -66,15 +69,16 @@ class TestGetDashboardData(unittest.TestCase):
 
     def test_models_populated(self):
         data = get_dashboard_data(db_path=self.db_path)
-        self.assertIn("claude-sonnet-4-6", data["all_models"])
+        self.assertIn("codex/custom", data["all_models"])
 
     def test_sessions_populated(self):
         data = get_dashboard_data(db_path=self.db_path)
         self.assertEqual(len(data["sessions_all"]), 1)
         session = data["sessions_all"][0]
         self.assertEqual(session["project"], "user/myproject")
-        self.assertEqual(session["model"], "claude-sonnet-4-6")
+        self.assertEqual(session["model"], "codex/custom")
         self.assertEqual(session["input"], 5000)
+        self.assertEqual(session["reasoning"], 300)
 
     def test_daily_by_model_populated(self):
         data = get_dashboard_data(db_path=self.db_path)
@@ -120,7 +124,7 @@ class TestGetDashboardData(unittest.TestCase):
         data = get_dashboard_data(db_path=self.db_path)
         rows = data["hourly_by_model"]
         self.assertTrue(all("day" in r and "model" in r for r in rows))
-        self.assertTrue(all(r["model"] == "claude-sonnet-4-6" for r in rows))
+        self.assertTrue(all(r["model"] == "codex/custom" for r in rows))
         self.assertTrue(all(r["day"] == "2026-04-08" for r in rows))
 
 
@@ -255,7 +259,7 @@ class TestDashboardHTTP(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Redirect DB_PATH + projects dirs to a tempdir so /api/rescan
-        # doesn't unlink the user's real ~/.claude/usage.db or scan their
+        # doesn't unlink the user's real ~/.codex/usage.db or scan their
         # real transcript directory during tests.
         import dashboard as _d
         import scanner as _s
@@ -295,10 +299,10 @@ class TestDashboardHTTP(unittest.TestCase):
         # Regression: ?range=... and ?models=... must not 404. The dashboard
         # itself rewrites the URL with these params via history.replaceState,
         # so anything that reloads or bookmarks the page hits this path.
-        for qs in ("?range=all", "?range=30d&models=claude-opus-4-7"):
+        for qs in ("?range=all", "?range=30d&models=codex/custom"):
             with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/{qs}") as resp:
                 self.assertEqual(resp.status, 200)
-                self.assertIn(b"Claude Code Usage Dashboard", resp.read())
+                self.assertIn(b"Codex Usage Dashboard", resp.read())
 
     def test_api_data_with_query_string(self):
         # /api/data is fetched without query parameters today, but the route
@@ -316,6 +320,10 @@ class TestDashboardHTTP(unittest.TestCase):
             data = json.loads(resp.read())
             # Should have expected keys (or error if no DB)
             self.assertTrue("all_models" in data or "error" in data)
+
+    def test_favicon_returns_no_content(self):
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/favicon.ico") as resp:
+            self.assertEqual(resp.status, 204)
 
     def test_api_rescan_returns_json(self):
         url = f"http://127.0.0.1:{self.port}/api/rescan"
@@ -349,14 +357,13 @@ class TestHTMLTemplate(unittest.TestCase):
     def test_template_has_chart_js(self):
         self.assertIn("chart.js", HTML_TEMPLATE.lower())
 
-    def test_template_has_substring_matching(self):
-        """Verify getPricing falls back to substring match for unknown models."""
-        self.assertIn("m.includes('opus')", HTML_TEMPLATE)
-        self.assertIn("m.includes('sonnet')", HTML_TEMPLATE)
-        self.assertIn("m.includes('haiku')", HTML_TEMPLATE)
+    def test_template_has_codex_pricing_fallback(self):
+        """Codex pricing is intentionally unavailable in local logs."""
+        self.assertIn("const PRICING = {};", HTML_TEMPLATE)
+        self.assertIn("pricing unavailable", HTML_TEMPLATE)
 
     def test_unknown_models_return_null(self):
-        """Verify getPricing returns null for non-Anthropic models."""
+        """Verify getPricing returns null when no Codex pricing is configured."""
         self.assertIn("return null;", HTML_TEMPLATE)
 
     def test_hourly_chart_canvas_present(self):

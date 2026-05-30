@@ -1,5 +1,5 @@
 """
-cli.py - Command-line interface for the Claude Code usage dashboard.
+cli.py - Command-line interface for the Codex usage dashboard.
 
 Commands:
   scan      - Scan JSONL files and update the database
@@ -14,19 +14,12 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
-DB_PATH = Path.home() / ".claude" / "usage.db"
+DB_PATH = Path.home() / ".codex" / "usage.db"
 
-PRICING = {
-    "claude-opus-4-7":   {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
-    "claude-opus-4-6":   {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
-    "claude-opus-4-5":   {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
-    "claude-sonnet-4-7": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-sonnet-4-5": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-haiku-4-7":  {"input": 1.00, "output":  5.00, "cache_read": 0.10, "cache_write": 1.25},
-    "claude-haiku-4-6":  {"input": 1.00, "output":  5.00, "cache_read": 0.10, "cache_write": 1.25},
-    "claude-haiku-4-5":  {"input": 1.00, "output":  5.00, "cache_read": 0.10, "cache_write": 1.25},
-}
+# Codex local transcripts currently expose token counts and provider names, but
+# not a stable public per-model billing table. Keep pricing empty so cost cells
+# render as n/a instead of pretending Claude API rates apply.
+PRICING = {}
 
 def get_pricing(model):
     if not model:
@@ -36,14 +29,6 @@ def get_pricing(model):
     for key in PRICING:
         if model.startswith(key):
             return PRICING[key]
-    # Substring fallback: match model family by keyword
-    m = model.lower()
-    if "opus" in m:
-        return PRICING["claude-opus-4-7"]
-    if "sonnet" in m:
-        return PRICING["claude-sonnet-4-6"]
-    if "haiku" in m:
-        return PRICING["claude-haiku-4-5"]
     return None
 
 def calc_cost(model, inp, out, cache_read, cache_creation):
@@ -66,6 +51,9 @@ def fmt(n):
 
 def fmt_cost(c):
     return f"${c:.4f}"
+
+def fmt_cost_for_model(model, cost):
+    return fmt_cost(cost) if get_pricing(model) else "n/a"
 
 def hr(char="-", width=60):
     print(char * width)
@@ -96,6 +84,7 @@ def cmd_today():
             SUM(output_tokens)         as out,
             SUM(cache_read_tokens)     as cr,
             SUM(cache_creation_tokens) as cc,
+            SUM(reasoning_tokens)      as rs,
             COUNT(*)                   as turns
         FROM turns
         WHERE substr(timestamp, 1, 10) = ?
@@ -119,7 +108,7 @@ def cmd_today():
         print()
         return
 
-    total_inp = total_out = total_cr = total_cc = total_turns = 0
+    total_inp = total_out = total_cr = total_cc = total_rs = total_turns = 0
     total_cost = 0.0
 
     for r in rows:
@@ -129,15 +118,17 @@ def cmd_today():
         total_out += r["out"] or 0
         total_cr  += r["cr"]  or 0
         total_cc  += r["cc"]  or 0
+        total_rs  += r["rs"]  or 0
         total_turns += r["turns"]
-        print(f"  {r['model']:<30}  turns={r['turns']:<4}  in={fmt(r['inp'] or 0):<8}  out={fmt(r['out'] or 0):<8}  cost={fmt_cost(cost)}")
+        print(f"  {r['model']:<30}  turns={r['turns']:<4}  in={fmt(r['inp'] or 0):<8}  out={fmt(r['out'] or 0):<8}  cost={fmt_cost_for_model(r['model'], cost)}")
 
     hr()
-    print(f"  {'TOTAL':<30}  turns={total_turns:<4}  in={fmt(total_inp):<8}  out={fmt(total_out):<8}  cost={fmt_cost(total_cost)}")
+    total_cost_display = fmt_cost(total_cost) if total_cost else "n/a"
+    print(f"  {'TOTAL':<30}  turns={total_turns:<4}  in={fmt(total_inp):<8}  out={fmt(total_out):<8}  cost={total_cost_display}")
     print()
     print(f"  Sessions today:   {sessions['cnt']}")
-    print(f"  Cache read:       {fmt(total_cr)}")
-    print(f"  Cache creation:   {fmt(total_cc)}")
+    print(f"  Cached input:     {fmt(total_cr)}")
+    print(f"  Reasoning tokens: {fmt(total_rs)}")
     hr()
     print()
     conn.close()
@@ -160,6 +151,7 @@ def cmd_week():
             SUM(output_tokens)         as out,
             SUM(cache_read_tokens)     as cr,
             SUM(cache_creation_tokens) as cc,
+            SUM(reasoning_tokens)      as rs,
             COUNT(*)                   as turns
         FROM turns
         WHERE substr(timestamp, 1, 10) BETWEEN ? AND ?
@@ -173,6 +165,7 @@ def cmd_week():
             SUM(output_tokens)         as out,
             SUM(cache_read_tokens)     as cr,
             SUM(cache_creation_tokens) as cc,
+            SUM(reasoning_tokens)      as rs,
             COUNT(*)                   as turns
         FROM turns
         WHERE substr(timestamp, 1, 10) BETWEEN ? AND ?
@@ -211,12 +204,13 @@ def cmd_week():
     for i in range(7):
         d = (start_d + timedelta(days=i)).isoformat()
         b = per_day.get(d, {"turns": 0, "inp": 0, "out": 0, "cost": 0.0})
-        print(f"    {d}  turns={b['turns']:<4}  in={fmt(b['inp']):<8}  out={fmt(b['out']):<8}  cost={fmt_cost(b['cost'])}")
+        cost_display = fmt_cost(b["cost"]) if b["cost"] else "n/a"
+        print(f"    {d}  turns={b['turns']:<4}  in={fmt(b['inp']):<8}  out={fmt(b['out']):<8}  cost={cost_display}")
 
     hr()
     print("  By Model:")
 
-    total_inp = total_out = total_cr = total_cc = total_turns = 0
+    total_inp = total_out = total_cr = total_cc = total_rs = total_turns = 0
     total_cost = 0.0
     for r in by_model:
         cost = calc_cost(r["model"], r["inp"] or 0, r["out"] or 0, r["cr"] or 0, r["cc"] or 0)
@@ -225,15 +219,17 @@ def cmd_week():
         total_out   += r["out"] or 0
         total_cr    += r["cr"]  or 0
         total_cc    += r["cc"]  or 0
+        total_rs    += r["rs"]  or 0
         total_turns += r["turns"]
-        print(f"    {r['model']:<30}  turns={r['turns']:<4}  in={fmt(r['inp'] or 0):<8}  out={fmt(r['out'] or 0):<8}  cost={fmt_cost(cost)}")
+        print(f"    {r['model']:<30}  turns={r['turns']:<4}  in={fmt(r['inp'] or 0):<8}  out={fmt(r['out'] or 0):<8}  cost={fmt_cost_for_model(r['model'], cost)}")
 
     hr()
-    print(f"    {'TOTAL':<30}  turns={total_turns:<4}  in={fmt(total_inp):<8}  out={fmt(total_out):<8}  cost={fmt_cost(total_cost)}")
+    total_cost_display = fmt_cost(total_cost) if total_cost else "n/a"
+    print(f"    {'TOTAL':<30}  turns={total_turns:<4}  in={fmt(total_inp):<8}  out={fmt(total_out):<8}  cost={total_cost_display}")
     print()
     print(f"  Sessions this week:  {sessions['cnt']}")
-    print(f"  Cache read:          {fmt(total_cr)}")
-    print(f"  Cache creation:      {fmt(total_cc)}")
+    print(f"  Cached input:        {fmt(total_cr)}")
+    print(f"  Reasoning tokens:    {fmt(total_rs)}")
     hr()
     print()
     conn.close()
@@ -259,6 +255,7 @@ def cmd_stats():
             SUM(output_tokens)            as out,
             SUM(cache_read_tokens)        as cr,
             SUM(cache_creation_tokens)    as cc,
+            SUM(reasoning_tokens)         as rs,
             COUNT(*)                      as turns
         FROM turns
     """).fetchone()
@@ -271,6 +268,7 @@ def cmd_stats():
             SUM(output_tokens)         as out,
             SUM(cache_read_tokens)     as cr,
             SUM(cache_creation_tokens) as cc,
+            SUM(reasoning_tokens)      as rs,
             COUNT(*)                   as turns,
             COUNT(DISTINCT session_id) as sessions
         FROM turns
@@ -317,7 +315,7 @@ def cmd_stats():
 
     print()
     hr("=")
-    print("  Claude Code Usage - All-Time Statistics")
+    print("  Codex Usage - All-Time Statistics")
     hr("=")
 
     first_date = (session_info["first"] or "")[:10]
@@ -328,17 +326,17 @@ def cmd_stats():
     print()
     print(f"  Input tokens:     {fmt(totals['inp'] or 0):<12}  (raw prompt tokens)")
     print(f"  Output tokens:    {fmt(totals['out'] or 0):<12}  (generated tokens)")
-    print(f"  Cache read:       {fmt(totals['cr'] or 0):<12}  (90% cheaper than input)")
-    print(f"  Cache creation:   {fmt(totals['cc'] or 0):<12}  (25% premium on input)")
+    print(f"  Cached input:     {fmt(totals['cr'] or 0):<12}  (served from prompt cache)")
+    print(f"  Reasoning tokens: {fmt(totals['rs'] or 0):<12}  (reasoning output tokens)")
     print()
-    print(f"  Est. total cost:  ${total_cost:.4f}")
+    print(f"  Est. total cost:  n/a (Codex logs do not expose public pricing)")
     hr()
 
     print("  By Model:")
     for r in by_model:
         cost = calc_cost(r["model"], r["inp"] or 0, r["out"] or 0, r["cr"] or 0, r["cc"] or 0)
         print(f"    {r['model']:<30}  sessions={r['sessions']:<4}  turns={fmt(r['turns'] or 0):<6}  "
-              f"in={fmt(r['inp'] or 0):<8}  out={fmt(r['out'] or 0):<8}  cost={fmt_cost(cost)}")
+              f"in={fmt(r['inp'] or 0):<8}  out={fmt(r['out'] or 0):<8}  cost={fmt_cost_for_model(r['model'], cost)}")
 
     hr()
     print("  Top Projects:")
@@ -383,7 +381,7 @@ def cmd_dashboard(projects_dir=None, host=None, port=None):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 USAGE = """
-Claude Code Usage Dashboard
+Codex Usage Dashboard
 
 Usage:
   python cli.py scan [--projects-dir PATH]   Scan JSONL files and update database
