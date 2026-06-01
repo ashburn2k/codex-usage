@@ -49,6 +49,9 @@ HOST=0.0.0.0 PORT=9000 python3 cli.py dashboard
 
 # Scan a custom transcript directory
 python3 cli.py scan --projects-dir /path/to/sessions
+
+# Export compact JSON for Home Assistant
+python3 ha_export.py --output ~/.codex/ha-codex-usage-summary.json
 ```
 
 The scanner is incremental. It tracks each file path, modification time, and processed line count, so repeated scans only process new transcript lines.
@@ -90,6 +93,7 @@ Data is stored in `~/.codex/usage.db`.
 | `scanner.py` | Parses Codex JSONL transcripts into SQLite |
 | `dashboard.py` | HTTP server plus single-page dashboard |
 | `cli.py` | `scan`, `today`, `week`, `stats`, and `dashboard` commands |
+| `ha_export.py` | Compact JSON exporter for Home Assistant cards |
 | `tests/` | Unit tests for parser, CLI helpers, and dashboard API |
 | `vscode-extension/` | Original extension source from upstream; not yet ported to Codex naming |
 

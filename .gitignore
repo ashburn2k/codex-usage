@@ -1,6 +1,7 @@
 __pycache__/
 server.log
 logs/
+scripts/export-to-ha.sh
 
 .pr-candidates.md
 /tmp/
