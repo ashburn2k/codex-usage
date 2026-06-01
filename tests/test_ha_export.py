@@ -39,6 +39,22 @@ SAMPLE_DATA = {
             "turns": 1,
         },
     ],
+    "hourly_by_model": [
+        {
+            "day": "2026-06-01",
+            "hour": 9,
+            "model": "codex/custom",
+            "output": 20,
+            "turns": 2,
+        },
+        {
+            "day": "2026-05-28",
+            "hour": 14,
+            "model": "codex/custom",
+            "output": 10,
+            "turns": 1,
+        },
+    ],
     "sessions_all": [
         {
             "session_id": "today",
@@ -99,6 +115,13 @@ class TestHomeAssistantExport(unittest.TestCase):
         self.assertEqual(payload["ranges"]["seven_days"]["total_tokens"], 535)
         self.assertEqual(payload["ranges"]["all_time"]["total_tokens"], 545)
         self.assertEqual(payload["top_projects_30d"][0]["project"], "Documents/codex")
+        self.assertEqual(payload["charts"]["range_label"], "30 days")
+        self.assertEqual(payload["charts"]["daily_30d"][0]["day"], "2026-05-28")
+        self.assertEqual(payload["charts"]["daily_30d"][1]["total_tokens"], 430)
+        self.assertEqual(payload["charts"]["daily_by_model_30d"][0]["model"], "codex/custom")
+        self.assertEqual(payload["charts"]["hourly_30d"]["day_count"], 2)
+        self.assertEqual(payload["charts"]["models_30d"][0]["total_tokens"], 535)
+        self.assertEqual(payload["charts"]["projects_30d"][0]["total_tokens"], 535)
 
 
 if __name__ == "__main__":
